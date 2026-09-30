@@ -1,4 +1,5 @@
 import pytest
+import pytest_asyncio
 import asyncio
 from datetime import datetime, timedelta
 from httpx import AsyncClient, ASGITransport
@@ -7,18 +8,24 @@ from app.main import app
 from app.core.database import get_database, connect_to_mongo, close_mongo_connection
 from app.core.security import get_password_hash
 
-# Set test environment configurations
-@pytest.fixture(scope="session")
-def event_loop():
+async def _mongo_available() -> bool:
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from app.core.config import settings
+    client = AsyncIOMotorClient(settings.MONGODB_URI, serverSelectionTimeoutMS=1500)
     try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+        await client.admin.command("ping")
+        return True
+    except Exception:
+        return False
+    finally:
+        client.close()
 
-@pytest.fixture(autouse=True)
+
+@pytest_asyncio.fixture(autouse=True)
 async def test_db_setup():
+    # Integration tests need a live MongoDB (set MONGODB_URI, uses DATABASE_NAME=homs_test).
+    if not await _mongo_available():
+        pytest.skip("MongoDB is not reachable; skipping integration tests")
     await connect_to_mongo()
     db = get_database()
 
@@ -123,12 +130,23 @@ async def test_full_system_flow():
         assert "pid_data" not in enrolled_doc["fingerprint_enrollment"]
 
         # 2. Student applies for outpass
+        window_start = datetime.utcnow() + timedelta(minutes=1)
         outpass_data = {
             "destination": "City Center mall",
             "reason": "Purchase books and check health",
-            "out_date": "2026-07-20T10:00:00",
-            "in_date": "2026-07-20T18:00:00"
+            "out_date": window_start.isoformat(),
+            "in_date": (window_start + timedelta(hours=8)).isoformat(),
         }
+
+        # Invalid time windows are rejected
+        bad_order = {**outpass_data, "in_date": (window_start - timedelta(hours=1)).isoformat()}
+        assert (await ac.post("/api/outpass/apply", json=bad_order, headers=headers_student)).status_code == 422
+        in_past = {
+            **outpass_data,
+            "out_date": (datetime.utcnow() - timedelta(days=1)).isoformat(),
+            "in_date": (datetime.utcnow() + timedelta(hours=1)).isoformat(),
+        }
+        assert (await ac.post("/api/outpass/apply", json=in_past, headers=headers_student)).status_code == 422
         
         apply_res = await ac.post("/api/outpass/apply", json=outpass_data, headers=headers_student)
         assert apply_res.status_code == 201

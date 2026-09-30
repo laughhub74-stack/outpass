@@ -1,11 +1,12 @@
 import secrets
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
 from bson import ObjectId
+from app.core.config import settings
 from app.core.database import get_database
-from app.core.hostels import get_assigned_hostel_name, hostel_names_match, normalize_hostel_name
+from app.core.hostels import find_warden_for_hostel, get_assigned_hostel_name, hostel_names_match, normalize_hostel_name
 from app.models.user import UserResponse
 from app.models.outpass import OutpassCreate, OutpassResponse, OutpassApprove, OutpassReject
 from app.models.pagination import PaginatedResponse, build_page
@@ -386,13 +387,25 @@ async def approve_outpass(
 
     if new_status in ["Advisor Approved", "HOD Approved"]:
         next_role = "hod" if new_status == "Advisor Approved" else "warden"
-        next_query = {"role": next_role, "enrollment_status": "active"}
         if next_role == "hod":
-            next_query["department"] = outpass.get("department")
-        next_user = await db.users.find_one(next_query)
-        next_email = next_user.get("email") if next_user else f"{next_role}@college.edu"
+            next_user = await db.users.find_one({
+                "role": "hod",
+                "enrollment_status": "active",
+                "department": outpass.get("department"),
+            })
+        else:
+            # Only the warden of this student's hostel is notified.
+            next_user = await find_warden_for_hostel(db, outpass.get("hostel_name"))
+        next_email = next_user.get("email") if next_user else None
+        if not next_email:
+            logger.warning(
+                "No active %s found for outpass %s; skipping next-approver notification.",
+                next_role, outpass["_id"],
+            )
 
         async def _notify_next():
+            if not next_email:
+                return
             try:
                 await send_intermediate_approval_notification(
                     next_approver_email=next_email,
@@ -411,7 +424,7 @@ async def approve_outpass(
     # If final approval (Warden), trigger Email Notifications
     if new_status == "Approved" and qr_token:
         student = await db.users.find_one({"_id": outpass["student_id"]})
-        student_email = student.get("email") if student else "student@college.edu"
+        student_email = student.get("email") if student else None
         parent_email = student.get("parent_email") if student and student.get("parent_email") else student_email
 
         hod_user = await db.users.find_one({
@@ -419,7 +432,7 @@ async def approve_outpass(
             "department": outpass.get("department"),
             "enrollment_status": "active",
         })
-        hod_email = hod_user.get("email") if hod_user else "hod@college.edu"
+        hod_email = hod_user.get("email") if hod_user else None
         warden_email = current_user.email
 
         async def _notify_final():
@@ -498,7 +511,7 @@ async def reject_outpass(
     
     # Retrieve student email to notify them of rejection
     student = await db.users.find_one({"_id": outpass["student_id"]})
-    student_email = student.get("email") if student else "student@college.edu"
+    student_email = student.get("email") if student else None
 
     async def _notify_rejection():
         try:
@@ -555,8 +568,21 @@ async def mark_gate(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot mark EXIT. Outpass status is: {current_status}. Must be Approved."
             )
+        now = datetime.utcnow()
+        out_date = outpass.get("out_date")
+        in_date = outpass.get("in_date")
+        if out_date and now < out_date - timedelta(minutes=settings.GATE_EXIT_EARLY_GRACE_MINUTES):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Outpass is not valid yet. Exit is allowed only from the approved out time.",
+            )
+        if in_date and now > in_date:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Outpass has expired. The approved time window has passed.",
+            )
         update_fields["status"] = "Student Left"
-        update_fields["exit_time"] = datetime.utcnow()
+        update_fields["exit_time"] = now
         history_item = {
             "status": "Student Left",
             "updated_by": ObjectId(current_user.id),

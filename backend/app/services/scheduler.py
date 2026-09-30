@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.core.database import get_database
+from app.core.hostels import find_warden_for_hostel
 from app.services.excel import generate_daily_excel_report
 from app.services.email import send_deadline_reminder
 
@@ -51,18 +52,23 @@ async def run_deadline_reminders_check():
                 continue
                 
             student_email = student_user.get("email")
-            parent_email = student_user.get("parent_email") or student_email # fallback
+            parent_email = student_user.get("parent_email") or student_email
             
             # Retrieve HOD and Warden emails (can fetch admin/role emails or standard config defaults)
-            warden_user = await db.users.find_one({"role": "warden", "enrollment_status": "active"})
+            # The warden responsible for THIS student's hostel, never "any warden".
+            warden_user = await find_warden_for_hostel(db, op.get("hostel_name"))
             hod_user = await db.users.find_one({
                 "role": "hod",
                 "department": op.get("department"),
                 "enrollment_status": "active",
             })
             
-            warden_email = warden_user.get("email") if warden_user else "warden@college.edu"
-            hod_email = hod_user.get("email") if hod_user else "hod@college.edu"
+            warden_email = warden_user.get("email") if warden_user else None
+            hod_email = hod_user.get("email") if hod_user else None
+            if not warden_email:
+                logger.warning(f"Scheduler: no active warden for hostel {op.get('hostel_name')!r} (outpass {op['_id']}).")
+            if not hod_email:
+                logger.warning(f"Scheduler: no active HOD for department {op.get('department')!r} (outpass {op['_id']}).")
             
             # Send Email
             await send_deadline_reminder(

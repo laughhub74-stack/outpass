@@ -1,3 +1,5 @@
+"""Create the initial HOMS super-administrator account."""
+
 import asyncio
 import os
 from pathlib import Path
@@ -12,11 +14,17 @@ from app.core.security import get_password_hash
 
 
 async def seed_database() -> None:
-    email = os.getenv("SUPER_ADMIN_EMAIL", "arthur@admin.com").strip().lower()
-    password = os.getenv("SUPER_ADMIN_PASSWORD", "password123")
-    name = os.getenv("SUPER_ADMIN_NAME", "Arthur Admin").strip()
+    # No defaults on purpose: a known default admin login is a backdoor.
+    email = (os.getenv("SUPER_ADMIN_EMAIL") or "").strip().lower()
+    password = os.getenv("SUPER_ADMIN_PASSWORD") or ""
+    name = (os.getenv("SUPER_ADMIN_NAME") or "").strip()
     if not email or not password or not name:
-        raise ValueError("SUPER_ADMIN_NAME, SUPER_ADMIN_EMAIL, and SUPER_ADMIN_PASSWORD must not be empty")
+        raise SystemExit(
+            "SUPER_ADMIN_NAME, SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must all be set "
+            "(see .env.example). Refusing to create an admin with default credentials."
+        )
+    if len(password) < 8 or password.lower() in {"password", "password123", "12345678", "admin123"}:
+        raise SystemExit("SUPER_ADMIN_PASSWORD is too weak: use at least 8 characters and avoid common passwords.")
 
     await connect_to_mongo()
     try:

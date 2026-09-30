@@ -52,8 +52,8 @@ export default function StudentDashboard({ token, userName, onLogout, apiUrl }) 
     e.preventDefault();
     setError("");
 
-    if (passwordForm.new_password.length < 6) {
-      setError("New password must be at least 6 characters long.");
+    if (passwordForm.new_password.length < 8) {
+      setError("New password must be at least 8 characters long.");
       return;
     }
 

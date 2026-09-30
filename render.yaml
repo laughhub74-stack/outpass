@@ -1,0 +1,35 @@
+# Render Blueprint. The backend needs a long-lived process because it runs an
+# APScheduler (daily Excel job + hourly deadline reminders), so it must NOT be
+# deployed as a serverless function (e.g. Vercel).
+services:
+  - type: web
+    name: homs-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    # Run exactly ONE instance: multiple instances would each run the scheduler
+    # and send duplicate reminder emails.
+    numInstances: 1
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: MONGODB_URI
+        sync: false
+      - key: DATABASE_NAME
+        value: homs
+      - key: FRONTEND_ORIGINS
+        sync: false
+      - key: BIOMETRIC_ENCRYPTION_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: EMAIL_FROM
+        sync: false

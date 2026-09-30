@@ -3,7 +3,7 @@ import io
 import logging
 import re
 import asyncio
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from app.core.config import settings
 from datetime import datetime
 from typing import Literal, Optional
@@ -15,7 +15,7 @@ from app.models.user import (
     UserCreate, UserResponse, UserUpdate, VALID_ROLES,
     DEPARTMENT_SCOPED_ROLES,
 )
-from app.models.outpass import OutpassResponse
+from app.models.outpass import OutpassResponse, to_naive_utc
 from app.models.audit import AuditLogResponse
 from app.models.pagination import PaginatedResponse, build_page
 from app.routes.dependencies import RoleChecker, SUPER_ADMIN_ROLES
@@ -48,6 +48,11 @@ class AdminOutpassUpdate(BaseModel):
     status: Optional[ADMIN_OUTPASS_STATUSES] = None
 
     model_config = {"extra": "forbid"}
+
+    @field_validator("out_date", "in_date")
+    @classmethod
+    def normalise_dates(cls, value):
+        return to_naive_utc(value) if value is not None else value
 
 
 def is_department_admin(user: UserResponse) -> bool:
@@ -530,6 +535,9 @@ async def update_outpass(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields provided for update")
         
     new_outpass_state = {**old_outpass, **update_data}
+    if new_outpass_state.get("in_date") and new_outpass_state.get("out_date"):
+        if new_outpass_state["in_date"] <= new_outpass_state["out_date"]:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="in_date must be after out_date")
     
     await db.outpasses.update_one({"_id": outpass_oid}, {"$set": update_data})
     

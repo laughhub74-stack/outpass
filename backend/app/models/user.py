@@ -133,7 +133,7 @@ class UserBase(BaseModel):
         return department
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8, max_length=128)
     fingerprint_enrollment: Optional[FingerprintEnrollment] = None
 
     @model_validator(mode="after")
@@ -158,7 +158,7 @@ class UserUpdate(BaseModel):
     enrollment_status: Optional[str] = None
     role: Optional[str] = None
     department: Optional[str] = None
-    password: Optional[str] = None
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
     photo: Optional[str] = Field(default=None, max_length=7_000_000)
     # A student may be re-enrolled from the account edit form. The route
     # validates the target role and encrypts the PID data before persistence.

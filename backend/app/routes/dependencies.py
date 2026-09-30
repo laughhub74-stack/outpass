@@ -1,6 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, JWTError
+import jwt
+from jwt import PyJWTError as JWTError
 from bson import ObjectId
 from app.core.config import settings
 from app.core.database import get_database

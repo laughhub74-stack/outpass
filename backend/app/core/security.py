@@ -1,7 +1,7 @@
 import bcrypt
 from datetime import datetime, timedelta
 from typing import Union, Any
-from jose import jwt
+import jwt
 from app.core.config import settings
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
