@@ -1,5 +1,3 @@
-"""Create the initial HOMS super-administrator account."""
-
 import asyncio
 import os
 from pathlib import Path
