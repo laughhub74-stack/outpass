@@ -33,10 +33,7 @@ app = FastAPI(
 # CORS Policy configuration. Production frontend origins must be listed in
 # FRONTEND_ORIGINS as a comma-separated environment variable.
 local_frontend_origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    "https://outpass-lyart.vercel.app"
 ]
 configured_frontend_origins = [
     origin.strip().rstrip("/")
